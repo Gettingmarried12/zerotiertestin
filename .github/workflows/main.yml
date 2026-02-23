@@ -1,0 +1,37 @@
+- name: Join and Auto-Authorize
+  shell: powershell
+  run: |
+    $NW_ID = "${{ secrets.ZEROTIER_NETWORK_ID }}"
+    $API_TOKEN = "${{ secrets.ZEROTIER_CENTRAL_TOKEN }}"
+    
+    # 1. Join the network
+    & "C:\Program Files (x86)\ZeroTier\One\zerotier-cli.bat" join $NW_ID
+    Start-Sleep -s 10
+    
+    # 2. Get the unique Node ID of this Runner
+    $NODE_ID = (& "C:\Program Files (x86)\ZeroTier\One\zerotier-cli.bat" info).Split(' ')[2]
+    Write-Host "Runner Node ID: $NODE_ID"
+
+    # 3. Fix 403: Use 'token' (no Bearer) and add a User-Agent
+    $headers = @{ 
+        "Authorization" = "token $API_TOKEN"
+        "User-Agent"    = "GitHub-Actions-RDP"
+        "Content-Type"  = "application/json"
+    }
+
+    # 4. JSON body must specifically target 'authorized'
+    $body = @{ config = @{ authorized = $true } } | ConvertTo-Json
+
+    # 5. Correct API URL
+    $url = "https://api.zerotier.com/api/v1/network/$NW_ID/member/$NODE_ID"
+    
+    # 6. Execute with Error Handling
+    try {
+        Invoke-RestMethod -Method Post -Uri $url -Headers $headers -Body $body
+        Write-Host "Successfully authorized $NODE_ID!"
+    } catch {
+        $errorMessage = $_.Exception.Message
+        Write-Host "Authorization Failed: $errorMessage"
+        # If still 403, check if your API token has 'Write' permissions in ZeroTier Central
+        exit 1
+    }
